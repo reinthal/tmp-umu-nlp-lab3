@@ -1,11 +1,183 @@
 import torch
-import numpy as np
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import gensim.downloader as api
 from torch.nn.functional import cosine_similarity
 import pickle
 import os
+import seaborn as sns
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+def plot_similarity_distribution(lower_bound, upper_bound, mean, sims, title):
+    """
+    Plot histogram of similarity scores with mean and 95% CI overlay.
+    
+    Parameters:
+    -----------
+    lower_bound : float
+        2.5th percentile (lower bound of 95% CI)
+    upper_bound : float
+        97.5th percentile (upper bound of 95% CI)
+    mean : float
+        Mean of similarity scores
+    sims : array-like
+        Array of all similarity scores
+    title : str
+        Plot title
+    """
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Plot histogram
+    sns.histplot(sims, bins=30, kde=True, color='skyblue', 
+                 edgecolor='black', alpha=0.7, ax=ax)
+    
+    # Plot mean line
+    ax.axvline(mean, color='red', linestyle='--', linewidth=2, 
+               label=f'Mean: {mean:.4f}')
+    
+    # Plot CI bounds
+    ax.axvline(lower_bound, color='orange', linestyle=':', linewidth=2,
+               label=f'CI Lower: {lower_bound:.4f}')
+    ax.axvline(upper_bound, color='orange', linestyle=':', linewidth=2,
+               label=f'CI Upper: {upper_bound:.4f}')
+    
+    # Shade CI region
+    ax.axvspan(lower_bound, upper_bound, alpha=0.2, color='orange',
+               label='95% CI')
+    
+    # Labels and formatting
+    ax.set_xlabel('Cosine Similarity', fontsize=12)
+    ax.set_ylabel('Frequency', fontsize=12)
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.legend(loc='upper left', fontsize=10)
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    return fig, ax
+
+
+# Example usage for 4 subplots:
+def plot_all_similarity_distributions(results_dict):
+    """
+    Create a 2x2 grid of similarity distributions.
+    
+    Parameters:
+    -----------
+    results_dict : dict
+        Dictionary with keys like 'contextual_avg', 'contextual_minmax', etc.
+        Each value should be a tuple of (lower_bound, upper_bound, mean, sims)
+    """
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    axes = axes.flatten()
+    
+    titles = [
+        'Contextual (Average Pooling)',
+        'Contextual (Min-Max Pooling)',
+        'Static GloVe (Average Pooling)',
+        'Static GloVe (Min-Max Pooling)'
+    ]
+    
+    for idx, (key, title) in enumerate(zip(results_dict.keys(), titles)):
+        lower, upper, mean, sims = results_dict[key]
+        ax = axes[idx]
+        
+        # Plot histogram
+        sns.histplot(sims, bins=30, kde=True, color='skyblue',
+                     edgecolor='black', alpha=0.7, ax=ax)
+        
+        # Plot mean and CI
+        ax.axvline(mean, color='red', linestyle='--', linewidth=2,
+                   label=f'Mean: {mean:.4f}')
+        ax.axvline(lower, color='orange', linestyle=':', linewidth=2,
+                   label=f'CI: [{lower:.4f}, {upper:.4f}]')
+        ax.axvline(upper, color='orange', linestyle=':', linewidth=2)
+        ax.axvspan(lower, upper, alpha=0.2, color='orange')
+        
+        # Formatting
+        ax.set_xlabel('Cosine Similarity', fontsize=11)
+        ax.set_ylabel('Frequency', fontsize=11)
+        ax.set_title(title, fontsize=13, fontweight='bold')
+        ax.legend(loc='upper left', fontsize=9)
+        ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    return fig
+
+def plot_overlaid_similarity_distributions(results_dict):
+    """
+    Create a 1x2 grid comparing contextual vs static embeddings.
+    Left: Average Pooling comparison
+    Right: Min-Max Pooling comparison
+    
+    Parameters:
+    -----------
+    results_dict : dict
+        Dictionary with keys: 'contextual_avg', 'contextual_minmax', 
+                              'static_avg', 'static_minmax'
+        Each value should be a tuple of (lower_bound, upper_bound, mean, sims)
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Left plot: Average Pooling
+    ax = axes[0]
+    
+    # Contextual average
+    lower_c, upper_c, mean_c, sims_c = results_dict['contextual_avg']
+    sns.histplot(sims_c, bins=30, kde=True, color='steelblue',
+                 edgecolor='navy', alpha=0.5, ax=ax, label='Contextual')
+    ax.axvline(mean_c, color='darkblue', linestyle='--', linewidth=2,
+               label=f'Contextual Mean: {mean_c:.4f}')
+    ax.axvspan(lower_c, upper_c, alpha=0.2, color='blue',
+               label=f'Contextual 95% CI: [{lower_c:.4f}, {upper_c:.4f}]')
+    
+    # Static average
+    lower_s, upper_s, mean_s, sims_s = results_dict['static_avg']
+    sns.histplot(sims_s, bins=30, kde=True, color='coral',
+                 edgecolor='darkred', alpha=0.5, ax=ax, label='Static (GloVe)')
+    ax.axvline(mean_s, color='darkred', linestyle='--', linewidth=2,
+               label=f'Static Mean: {mean_s:.4f}')
+    ax.axvspan(lower_s, upper_s, alpha=0.2, color='red',
+               label=f'Static 95% CI: [{lower_s:.4f}, {upper_s:.4f}]')
+    
+    ax.set_xlabel('Cosine Similarity', fontsize=12)
+    ax.set_ylabel('Frequency', fontsize=12)
+    ax.set_title('Average Pooling: Contextual vs Static Embeddings', 
+                 fontsize=13, fontweight='bold')
+    ax.legend(loc='upper left', fontsize=9)
+    ax.grid(True, alpha=0.3)
+    
+    # Right plot: Min-Max Pooling
+    ax = axes[1]
+    
+    # Contextual minmax
+    lower_c, upper_c, mean_c, sims_c = results_dict['contextual_minmax']
+    sns.histplot(sims_c, bins=30, kde=True, color='steelblue',
+                 edgecolor='navy', alpha=0.5, ax=ax, label='Contextual')
+    ax.axvline(mean_c, color='darkblue', linestyle='--', linewidth=2,
+               label=f'Contextual Mean: {mean_c:.4f}')
+    ax.axvspan(lower_c, upper_c, alpha=0.2, color='blue',
+               label=f'Contextual 95% CI: [{lower_c:.4f}, {upper_c:.4f}]')
+    
+    # Static minmax
+    lower_s, upper_s, mean_s, sims_s = results_dict['static_minmax']
+    sns.histplot(sims_s, bins=30, kde=True, color='coral',
+                 edgecolor='darkred', alpha=0.5, ax=ax, label='Static (GloVe)')
+    ax.axvline(mean_s, color='darkred', linestyle='--', linewidth=2,
+               label=f'Static Mean: {mean_s:.4f}')
+    ax.axvspan(lower_s, upper_s, alpha=0.2, color='red',
+               label=f'Static 95% CI: [{lower_s:.4f}, {upper_s:.4f}]')
+    
+    ax.set_xlabel('Cosine Similarity', fontsize=12)
+    ax.set_ylabel('Frequency', fontsize=12)
+    ax.set_title('Min-Max Pooling: Contextual vs Static Embeddings', 
+                 fontsize=13, fontweight='bold')
+    ax.legend(loc='upper left', fontsize=9)
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    return fig
 
 # ----------------------------
 # Pooling utilities
@@ -128,13 +300,13 @@ def bootstrap_similarity(emb1: torch.Tensor, emb2: torch.Tensor, n_boot=1000, po
         sim = cosine_similarity(pooled1, pooled2).item()
         sims.append(sim)
 
-    return np.percentile(sims, 2.5), np.percentile(sims, 97.5), np.mean(sims)
+    return (np.percentile(sims, 2.5), np.percentile(sims, 97.5), np.mean(sims)), sims
 
 # ----------------------------
 # Main
 # ----------------------------
 def main():
-    # ---- Load data ----
+    # ---- Load datbootstrap_similaritya ----
     with open("data/dataset.0", "r") as f:
         dataset_0 = f.read()
     with open("data/dataset.1", "r") as f:
@@ -222,23 +394,39 @@ def main():
     score4 = cosine_similarity(glv0_minmax.unsqueeze(0), glv1_minmax.unsqueeze(0)).item()
 
     print("\n===== Cosine Similarity Scores =====")
-    print(f"Score1 (contextual + average pooling): {score1:.4f}")
-    print(f"Score2 (contextual + min-max pooling): {score2:.4f}")
-    print(f"Score3 (static + average pooling):     {score3:.4f}")
-    print(f"Score4 (static + min-max pooling):     {score4:.4f}")
+    print(f"Qwen avg:  (contextual + average pooling): {score1:.4f}")
+    print(f"Qwen min/max: (contextual + min-max pooling): {score2:.4f}")
+    print(f"GloVe avg:  (static + average pooling):     {score3:.4f}")
+    print(f"GloVe min/max: (static + min-max pooling):     {score4:.4f}")
 
     # ---- Bootstrap 95% confidence intervals ----
     # Use token-level embeddings for bootstrapping, NOT pooled embeddings
     print("\n===== 95% Confidence Intervals via Bootstrapping =====")
-    ci1 = bootstrap_similarity(emb0_tokens, emb1_tokens, pooling="average")
-    ci2 = bootstrap_similarity(emb0_tokens, emb1_tokens, pooling="minmax")
-    ci3 = bootstrap_similarity(glv0_emb, glv1_emb, pooling="average")
-    ci4 = bootstrap_similarity(glv0_emb, glv1_emb, pooling="minmax")
+    ci_qwen_avg, samples_qwen_avg = bootstrap_similarity(emb0_tokens, emb1_tokens, pooling="average")
+    ci_qwen_minmax, samples_qwen_minmax = bootstrap_similarity(emb0_tokens, emb1_tokens, pooling="minmax")
+    ci_glove_avg, samples_glove_avg = bootstrap_similarity(glv0_emb, glv1_emb, pooling="average")
+    ci_glove_minmax, samples_glove_minmax = bootstrap_similarity(glv0_emb, glv1_emb, pooling="minmax")
+    # Multi-plot
+    print("\n===== Plotting results =====")
+    results = {
+        'contextual_avg': (*ci_qwen_avg, samples_qwen_avg),
+        'contextual_minmax': (*ci_qwen_minmax, samples_qwen_minmax),
+        'static_avg': (*ci_glove_avg, samples_glove_avg),
+        'static_minmax': (*ci_glove_minmax, samples_glove_minmax),
+    }
 
-    print(f"Score1 CI:  {ci1[0]:.4f} - {ci1[1]:.4f} (mean={ci1[2]:.4f})")
-    print(f"Score2 CI:  {ci2[0]:.4f} - {ci2[1]:.4f} (mean={ci2[2]:.4f})")
-    print(f"Score3 CI:  {ci3[0]:.4f} - {ci3[1]:.4f} (mean={ci3[2]:.4f})")
-    print(f"Score4 CI:  {ci4[0]:.4f} - {ci4[1]:.4f} (mean={ci4[2]:.4f})")
+    fig = plot_overlaid_similarity_distributions(results)
+    plt.savefig('similarity_comparison_2plots.png', dpi=300, bbox_inches='tight')
+    print(f"Context (Qwen) avg CI:  {ci_qwen_avg[0]:.4f} - {ci_qwen_avg[1]:.4f} (mean={ci_qwen_avg[2]:.4f})")
+    print(f"Context (Qwen) avg min/max:  {ci_qwen_avg[-2]:.4f} - {ci_qwen_avg[-1]:.4f}")
+    print(f"Context (Qwen) min/max CI:  {ci_qwen_minmax[0]:.4f} - {ci_qwen_minmax[1]:.4f} (mean={ci_qwen_minmax[2]:.4f})")
+    print(f"Context (Qwen) min/max min/max:  {ci_qwen_minmax[-2]:.4f} - {ci_qwen_minmax[-1]:.4f}")
+
+    print(f"Static (GloVe) avg CI:  {ci_glove_avg[0]:.4f} - {ci_glove_avg[1]:.4f} (mean={ci_glove_avg[2]:.4f})")
+    print(f"Static (GloVe) avg min/max:  {ci_glove_avg[-2]:.4f} - {ci_glove_avg[-1]:.4f}")
+    
+    print(f"Static (GloVe) min/max CI:  {ci_glove_minmax[0]:.4f} - {ci_glove_minmax[1]:.4f} (mean={ci_glove_minmax[2]:.4f})")
+    print(f"Static (GloVe) min/max min/max:  {ci_glove_minmax[-2]:.4f} - {ci_glove_minmax[-1]:.4f}")
 
 if __name__ == "__main__":
     main()

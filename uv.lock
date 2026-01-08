@@ -5565,6 +5565,7 @@ dependencies = [
     { name = "torchvision" },
     { name = "tqdm" },
     { name = "transformers" },
+    { name = "ty" },
     { name = "vllm" },
     { name = "websockets" },
 ]
@@ -5616,6 +5617,7 @@ requires-dist = [
     { name = "torchvision" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "transformers", specifier = ">=4.47.0" },
+    { name = "ty", specifier = ">=0.0.1a32" },
     { name = "vllm", specifier = ">=0.6.6" },
     { name = "websockets", specifier = ">=15.0.1" },
 ]
