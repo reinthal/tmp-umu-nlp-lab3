@@ -1,0 +1,2 @@
+- [x] Can I train the simple_classifier?
+- [ ] Can I train the deep classifier?
